@@ -62,8 +62,12 @@ def vec(matrix):
 # returns square matrix
 # if matrix is not squareable, does approximate square matrix with dimensions n+1 x n
 def square_mat(matrix):
-    entries = lb[matrix.shape[0]]+lb[matrix.shape[1]]
+    entries = qcount(matrix)
     return matrix.reshape((2**(entries-entries//2),2**(entries//2)),order='F')
+
+# returns purity of state
+def purity(state):
+    
 
 # returns number of qubits in state based on size
 def qcount(state):
@@ -73,7 +77,7 @@ def qcount(state):
 # applies a list of 15 gates to the state
 # returns state after applying gates
 def applyGates(state, gates):
-    return tensor(gates[7:]) @ state @ tensor(gates[:7]).conj().T
+    return tensor(gates[len(gates)//2:]) @ state @ tensor(gates[:len(gates)//2]).conj().T
 
 # applies a single-qubit gate to multiple qubits based on input list
 # state is a sparse matrix
@@ -125,6 +129,7 @@ def rm_decode(state):
     return state
 
 # performs checks for Reed-Muller code
+# assumes encoded state is in top 15 qubits
 # returns two arrays, one for the measurement results of the Z stabilizers and one for the X stabilizers
 def check(state):
     state = square_mat(state)
@@ -143,8 +148,7 @@ def benchmark(n=20):
     for i in range(n):
         start_time = time.perf_counter()
         
-        rm_state = sp.sparse.coo_array(([1],([0],[0])),shape=(2,1),dtype=np.complex_)
-        #rm_state = sp.sparse.coo_array(([1],([0],[0])),shape=(2**8,2**7),dtype=np.complex_)
+        rm_state = sp.sparse.coo_array(([1],([0],[0])),shape=(2**8,2**7),dtype=np.complex_)
         rm_state = rm_encode(rm_state)
         for i in range(1,16):
             rm_state = applyGateOn(rm_state,X,[i])
