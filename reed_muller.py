@@ -3,6 +3,10 @@ import numpy as np
 import scipy as sp
 import time
 
+# state kets for |0> and |1>
+ket0 = sp.sparse.csc_array(([1],([0],[0])),shape=(2,1),dtype=np.complex_)
+ket1 = sp.sparse.csc_array(([1],([1],[0])),shape=(2,1),dtype=np.complex_)
+
 # density matrices for |0> and |1>
 ZERO = sp.sparse.coo_array(np.array([[1,0],[0,0]],dtype=np.complex_)) 
 ONE = sp.sparse.coo_array(np.array([[0,0],[0,1]],dtype=np.complex_))
@@ -40,6 +44,7 @@ Xstabs=[[tensor([X,I,X,I,X,I,X]),tensor([I,X,I,X,I,X,I,X])],
 
 # dictionary for fast log base 2 lookup
 # handles 1 to 2^63, with 2^63 being one larger than the maximum possible array dimension
+'''
 lb={1:0, 2:1, 4:2, 8:3, 16:4, 32:5, 64:6, 128:7, 256:8, 512:9, 1024:10, 2048:11, 4096:12,
     8192:13, 16384:14, 32768:15, 65536:16, 131072:17, 262144:18, 524288:19, 1048576:20,
     2097152:21, 4194304:22, 8388608:23, 16777216:24, 33554432:25, 67108864:26, 134217728:27,
@@ -51,7 +56,7 @@ lb={1:0, 2:1, 4:2, 8:3, 16:4, 32:5, 64:6, 128:7, 256:8, 512:9, 1024:10, 2048:11,
     4503599627370496:52, 9007199254740992:53, 18014398509481984:54, 36028797018963968:55,
     72057594037927936:56, 144115188075855872:57, 288230376151711744:58, 576460752303423488:59,
     1152921504606846976:60, 2305843009213693952:61, 4611686018427387904:62, 9223372036854775808:63}
-
+'''
 # converts matrix to column vector
 # returns column vector
 def vec(matrix):
@@ -63,21 +68,22 @@ def vec(matrix):
 # if matrix is not squareable, does approximate square matrix with dimensions n+1 x n
 def square_mat(matrix):
     entries = qcount(matrix)
-    return matrix.reshape((2**(entries-entries//2),2**(entries//2)),order='F')
+    return matrix.reshape((1<<(entries-entries//2),1<<(entries//2)),order='F')
 
 # returns purity of state
-def purity(state):
+#def purity(state):
     
 
 # returns number of qubits in state based on size
 def qcount(state):
     r,c = state.shape
-    return lb[r]+lb[c]
+    return int(np.log2(r*c))
+    #return lb[r]+lb[c]
 
 # applies a list of 15 gates to the state
 # returns state after applying gates
 def applyGates(state, gates):
-    return tensor(gates[len(gates)//2:]) @ state @ tensor(gates[:len(gates)//2]).conj().T
+    return (tensor(gates[len(gates)//2:]) @ state @ tensor(gates[:len(gates)//2]).conj().T).tocsr()
 
 # applies a single-qubit gate to multiple qubits based on input list
 # state is a sparse matrix
@@ -105,34 +111,51 @@ def CNOT(state, controls, targets):
         CNOT_matrices_one[i-1] = X
     return applyGates(state, CNOT_matrices_zero)+applyGates(state, CNOT_matrices_one)
     
+# performs partial trace with respect to input list
+# outputs traced state
+# assumes state is NOT mixed
+def partial_trace(state, wrt):
+    system_size = qcount(state)
+    subsystem_size = len(wrt)
+    if state.size() == 1:
+        bits = state.shape
+        state.row[0]
+
 # encodes state into [[15,1,3]] Reed-Muller code
-# input is a 1-qubit state
+# input is a 1-qubit state on row p (15 by default)
 # output is a 15-qubit state
-def rm_encode(state):
-    state = applyGateOn(state, H, [1,2,4,8])
-    state = CNOT(state, [1], [3,5,7,9,11,13,15])
-    state = CNOT(state, [2], [3,6,7,10,11,14,15])
-    state = CNOT(state, [4], [5,6,7,12,13,14,15])
-    state = CNOT(state, [8], [9,10,11,12,13,14,15])
+def rm_encode(state, p=15):
+    zeros = sp.sparse.csc_array(([1],([0],[0])),shape=(128,128),dtype=np.complex_)
+    state = sp.sparse.kron(zeros,state,format='csc')
+    offset = p-15
+    state = applyGateOn(state, H, np.array([1,2,4,8])+offset)
+    state = CNOT(state, [1+offset], np.array([3,5,7,9,11,13,15])+offset)
+    state = CNOT(state, [2+offset], np.array([3,6,7,10,11,14,15])+offset)
+    state = CNOT(state, [4+offset], np.array([5,6,7,12,13,14,15])+offset)
+    state = CNOT(state, [8+offset], np.array([9,10,11,12,13,14,15])+offset)
     return state
     
 # decodes state from [[15,1,3]] Reed-Muller code
-# input is a 15-qubit state
+# input is a 15-qubit state on row 1
 # output is a 1-qubit state
-def rm_decode(state):
-    state = CNOT(state, [8], [9,10,11,12,13,14,15])
-    state = CNOT(state, [4], [5,6,7,12,13,14,15])
-    state = CNOT(state, [2], [3,6,7,10,11,14,15])
-    state = CNOT(state, [1], [3,5,7,9,11,13,15])
-    state = CNOT(state, [15], [3,5,6,9,10,12])
-    state = applyGateOn(state, H, [1,2,4,8])
+def rm_decode(state, p=1):
+    offset = p-1
+    state = CNOT(state, [8+offset], np.array([9,10,11,12,13,14,15])+offset)
+    state = CNOT(state, [4+offset], np.array([5,6,7,12,13,14,15])+offset)
+    state = CNOT(state, [2+offset], np.array([3,6,7,10,11,14,15])+offset)
+    state = CNOT(state, [1+offset], np.array([3,5,7,9,11,13,15])+offset)
+    state = CNOT(state, [15+offset], np.array([3,5,6,9,10,12])+offset)
+    state = applyGateOn(state, H, np.array([1,2,4,8])+offset)
     return state
 
 # performs checks for Reed-Muller code
 # assumes encoded state is in top 15 qubits
+# assumes encoded state is not entangled with rest of system
 # returns two arrays, one for the measurement results of the Z stabilizers and one for the X stabilizers
-def check(state):
-    state = square_mat(state)
+def check(state, p=1):
+    if qcount(state) != 15:
+        state = partial_trace(state)
+    #state = square_mat(state)
     Zchecks = np.zeros(10,dtype=np.complex_)
     Xchecks = np.zeros(4,dtype=np.complex_)
     state_c = state.conj()
@@ -141,14 +164,24 @@ def check(state):
     for i in range(4):
         Xchecks[i] = (state_c*(Xstabs[i][1] @ state @ Xstabs[i][0])).sum()
     return Zchecks, Xchecks
-    
+
+def decode_check(Zchecks, Xchecks):
+    Zpos = 0
+    Xpos = 0
+    for i in range(10):
+        return
+    for i in range(4):
+        if Xchecks[i].real < 0:
+            Zpos += 1<<i
+    return Zpos, Xpos
+
 # Code used for timing
-def benchmark(n=20):
+def benchmark(n=10):
     avg = 0
     for i in range(n):
         start_time = time.perf_counter()
         
-        rm_state = sp.sparse.coo_array(([1],([0],[0])),shape=(2**8,2**7),dtype=np.complex_)
+        rm_state = ket0.copy()
         rm_state = rm_encode(rm_state)
         for i in range(1,16):
             rm_state = applyGateOn(rm_state,X,[i])

@@ -28,5 +28,3 @@ for i in range(0,32768):
 for key in list(error_mapping.keys()):
 	if error_mapping[key] = -1:
 		del error_mapping[key]
-
-print(len(error_mapping))
