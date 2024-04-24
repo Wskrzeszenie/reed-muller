@@ -1,30 +1,33 @@
 from reed_muller import *
 
+# code used to create error lookup dictionary for Zchecks
+
 rm_state = ket0.copy()
 rm_state = rm_encode(rm_state)
-error_mapping = {}
-for i in range(0,32768):
-	positions = []
-	for j in range(15):
-		if 1&(i>>j):
-			positions.append(j+1)
-	if positions:
-		rm_state = applyGateOn(rm_state,X,positions)
-		Zchecks,Xchecks = check(rm_state)
-		rm_state = applyGateOn(rm_state,X,positions)
-	check_bits = 0
-	for j in range(len(Zchecks)):
-		if Zchecks[j].real < 0:
-			check_bits += 1<<j
-	if check_bits in error_mapping:
-		if i.bit_count() == error_mapping[check_bits].bit_count():
-			error_mapping[check_bits] = -1
-		elif i.bit_count() < error_mapping[check_bits].bit_count():
-			error_mapping[check_bits] = i
-	else:
-		error_mapping[check_bits] = i
-	if i%1024==0: print(i)
+                            #0b111111111111111
+error_mapping = [32767 for _ in range(1024)]
 
-for key in list(error_mapping.keys()):
-	if error_mapping[key] = -1:
-		del error_mapping[key]
+# use bits of number to indicate bit flip positions
+# leftmost is 1st qubit, rightmost is 15th qubit
+for i in range(0,32768):
+    # apply X gates (bit flips) only on the bits that differ between iterations
+    if i: rm_state = apply_gate_on(rm_state,X,(i-1)^i)
+    # perform checks
+    Zchecks,Xchecks = check(rm_state)
+    # calculate 3 conditions for most likely error
+    # 1) smallest number of qubits affected
+    # 2) smallest distance between leftmost and rightmost qubits (1st qubit is leftmost, 15th qubit is rightmost)
+    # 3) error closest to original encoded qubit (1st qubit)
+    i_cond = (i.bit_count(), bit_distance(i), i.bit_length())
+    curr_cond = (error_mapping[Zchecks].bit_count(), bit_distance(error_mapping[Zchecks]), error_mapping[Zchecks].bit_length())
+    if ((i_cond[0] < curr_cond[0]) or
+        (i_cond[0] == curr_cond[0] and i_cond[1] < curr_cond[1]) or
+        (i_cond[0] == curr_cond[0] and i_cond[1] == curr_cond[1] and i_cond[2] < curr_cond[2])):
+        error_mapping[Zchecks] = i
+
+#for key in list(error_mapping.keys()):
+#    if error_mapping[key] < 0:
+#        del error_mapping[key]
+        
+print(error_mapping)
+print(len(error_mapping))
