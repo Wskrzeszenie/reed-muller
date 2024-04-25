@@ -1,19 +1,16 @@
 from reed_muller import *
-from Zcheck_decoder import *
 
 '''
-count = 0
+runs = 10
+steps = 20
+error_results = (steps-1)*[None]
 
-for key in Zcheck_decode_lists.keys():
-    possible_errors = Zcheck_decode_lists[key]
-    for i in range(len(possible_errors)):
-        possible_errors[i] = (bit_distance(possible_errors[i]), 15-possible_errors[i].bit_length(), possible_errors[i])
-    possible_errors.sort()
+for i in range(1,steps):
+	error_results[i-1] = simulate_QEC(n=runs, error_rate=np.round(i/20,2))
+			
+error_results = np.array(error_results)
 
-    if len(possible_errors) != 1 and possible_errors[0][0] == possible_errors[1][0] and possible_errors[0][1] == possible_errors[1][1]:
-        print("Ambiguous check: ", key, possible_errors)
-        count += 1
-
-print(count)
+np.save('results.npy', error_results)
 '''
-benchmark(n=20)
+error_results = np.load('results.npy')
+print(error_results)
