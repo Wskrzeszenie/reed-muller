@@ -1,10 +1,8 @@
 import functools as ft
 import numpy as np
+import os.path
 import scipy as sp
 import time
-
-# file storing lookup table for Zchecks and Xchecks
-from lookup import *
 
 # for the scipy library, COO is faster for general storage, reshaping and tensor products
 #                        CSR/CSC is faster for arithmetic
@@ -214,6 +212,46 @@ def check(state, p=1, format='bits'):
             Xchecks[i] = (state_c*(Xstabs[i][1] @ state.tocsc() @ Xstabs[i][0])).sum()
     return Zchecks, Xchecks
 
+# file storing lookup table for Zchecks and Xchecks
+# create lookup table if it doesn't not already exist
+if not os.path.exists('Zcheck_lookup.npy'):
+	# code used to create error lookup dictionary for Zchecks
+
+	rm_state = ket0.copy()
+	rm_state = rm_encode(rm_state)
+
+	# fill list with 1024 entries that are the least optimal error 
+			                    #0b111111111111111
+	error_mapping = [32767 for _ in range(1024)]
+
+	# use bit array to indicate bit flip positions
+	# leftmost is 15th qubit, rightmost is 1st qubit
+	for i in range(0,32768):
+		# apply X gates (bit flips) only on the bits that differ between iterations
+		if i: rm_state = apply_gate_on(rm_state,X,(i-1)^i)
+		# perform checks
+		Zchecks,Xchecks = check(rm_state)
+		# calculate 3 conditions for most likely error
+		# 1) smallest number of qubits affected
+		# 2) smallest distance between leftmost and rightmost affected qubits
+		# 3) error closest to original encoded qubit (1st qubit)
+		i_cond = (i.bit_count(), bit_distance(i), i.bit_length())
+		curr_error = error_mapping[Zchecks]
+		curr_cond = (curr_error.bit_count(), bit_distance(curr_error), curr_error.bit_length())
+		# check conditions in order of precedence, store optimal result
+		if ((i_cond[0] < curr_cond[0]) or
+			(i_cond[0] == curr_cond[0] and i_cond[1] < curr_cond[1]) or
+			(i_cond[0] == curr_cond[0] and i_cond[1] == curr_cond[1] and i_cond[2] < curr_cond[2])):
+			error_mapping[Zchecks] = i
+			
+	error_mapping = np.array(error_mapping)
+	np.save('Zcheck_lookup.npy', error_mapping)
+
+# Z checks map based on previously mentioned criteria
+Zcheck_decode = np.load('Zcheck_lookup.npy')
+# X checks map directly because each set of measurements corresponds to a unique 1-qubit error
+Xcheck_decode = np.array([0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384])
+
 # code used for timing benchmark
 def benchmark(n=10):
     avg = 0
@@ -225,21 +263,15 @@ def benchmark(n=10):
         for i in range(0,15):
             rm_state = apply_gate_on(rm_state, X, 1<<i)
             Zchecks, Xchecks = check(rm_state)
-            if print_checks:
-                print(bits_to_array(Zcheck_decode[Zchecks]), bits_to_array(Xcheck_decode[Xchecks]))
             rm_state = apply_gate_on(rm_state, X, 1<<i)
         for i in range(0,15):
             rm_state = apply_gate_on(rm_state, Z, 1<<i)
             Zchecks, Xchecks = check(rm_state)
-            if print_checks:
-                print(bits_to_array(Zcheck_decode[Zchecks]), bits_to_array(Xcheck_decode[Xchecks]))
             rm_state = apply_gate_on(rm_state, Z, 1<<i)
         rm_state = rm_decode(rm_state)
         end_time = time.perf_counter()-start_time
-        if print_times:
-            print(end_time)
         avg += end_time/n
-    print(f"Avg:{avg}")
+    print(f'Avg:{avg}')
     
 # code used for debugging Reed-Muller encoding/decoding, checks, logical operators
 def debug_run():
@@ -267,8 +299,16 @@ def debug_run():
     print(vec(rm_state))
 
 # simulate a noisy Pauli error channel
-#
+
 def simulate_QEC(n=10, error_rate=0.1, print_output=False):
+	# columns: relevant qubit position, with 0 being no error
+	# rows:
+	# - 0: Correctely detected X error 
+	# - 1: Incorrectly detected X error that did not cause logical error
+	# - 2: Logical X error
+	# - 3: Correctely detected Z error 
+	# - 4: Incorrectly detected Z error that did not cause logical error
+	# - 5: Logical Z error
     errors = np.zeros((6,16),dtype=int)
     for i in range(n):
         rng = np.random.default_rng()

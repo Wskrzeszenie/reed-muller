@@ -23,4 +23,4 @@ for i in range(100):
     else:
         csc += 1
         
-print(csc,csr)
+print(csr,csc)
