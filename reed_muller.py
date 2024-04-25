@@ -234,14 +234,14 @@ if not os.path.exists('Zcheck_lookup.npy'):
 		# calculate 3 conditions for most likely error
 		# 1) smallest number of qubits affected
 		# 2) smallest distance between leftmost and rightmost affected qubits
-		# 3) error closest to original encoded qubit (1st qubit)
+		# 3) error closest to original encoded qubit (15th qubit)
 		i_cond = (i.bit_count(), bit_distance(i), i.bit_length())
 		curr_error = error_mapping[Zchecks]
 		curr_cond = (curr_error.bit_count(), bit_distance(curr_error), curr_error.bit_length())
 		# check conditions in order of precedence, store optimal result
 		if ((i_cond[0] < curr_cond[0]) or
 			(i_cond[0] == curr_cond[0] and i_cond[1] < curr_cond[1]) or
-			(i_cond[0] == curr_cond[0] and i_cond[1] == curr_cond[1] and i_cond[2] < curr_cond[2])):
+			(i_cond[0] == curr_cond[0] and i_cond[1] == curr_cond[1] and i_cond[2] > curr_cond[2])):
 			error_mapping[Zchecks] = i
 			
 	error_mapping = np.array(error_mapping)
@@ -299,17 +299,19 @@ def debug_run():
     print(vec(rm_state))
 
 # simulate a noisy Pauli error channel
-
-def simulate_QEC(n=10, error_rate=0.1, print_output=False):
-	# columns: relevant qubit position, with 0 being no error
-	# rows:
-	# - 0: Correctely detected X error 
+# either simulates code capacity 'cc' or phenomenological 'ph'
+# ph_error sets the error rate of measurements
+# ph_rep sets the number of measurements to do
+def simulate_QEC(n=100, error_rate=0.1, model='cc', ph_error=0.1, ph_rep=3, print_output=False):
+	# rows: # of actual qubit errors
+	# columns:
+	# - 0: Correctly detected X error 
 	# - 1: Incorrectly detected X error that did not cause logical error
 	# - 2: Logical X error
-	# - 3: Correctely detected Z error 
+	# - 3: Correctly detected Z error 
 	# - 4: Incorrectly detected Z error that did not cause logical error
 	# - 5: Logical Z error
-    errors = np.zeros((6,16),dtype=int)
+    errors = np.zeros((16,6),dtype=int) if model=='cc' else np.zeros((16,15,6),dtype=int)
     for i in range(n):
         rng = np.random.default_rng()
         Xrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
@@ -323,7 +325,12 @@ def simulate_QEC(n=10, error_rate=0.1, print_output=False):
         rm_state = rm_encode(rm_state)
         rm_state = apply_gate_on(rm_state, X, Xerrors)
         rm_state = apply_gate_on(rm_state, Z, Zerrors)
-        Zchecks, Xchecks = check(rm_state)
+        Zchecks = 0
+        Xchecks = 0 
+        if model=='cc':
+            Zchecks, Xchecks = check(rm_state)
+        else:
+            Zchecks, Xchecks = check(rm_state)
         rm_state = apply_gate_on(rm_state, X, Zcheck_decode[Zchecks])
         rm_state = apply_gate_on(rm_state, Z, Xcheck_decode[Xchecks])
         rm_state = rm_decode(rm_state)
@@ -334,21 +341,21 @@ def simulate_QEC(n=10, error_rate=0.1, print_output=False):
         # X errors
         # detected correct error
         if Xerrors == Zcheck_decode[Zchecks]:
-            errors[0][Xerror_ct] += 1
+            errors[Xerror_ct][0] += 1
         # logical error
         elif rm_state.indices[0]:
-            errors[2][Xerror_ct] += 1
+            errors[Xerror_ct][2] += 1
         # detected incorrect error but did not cause logical error
         else:
-            errors[1][Xerror_ct] += 1
+            errors[Xerror_ct][1] += 1
         
         # same but for Z errors
         if Zerrors == Xcheck_decode[Xchecks]:
-            errors[3][Zerror_ct] += 1
+            errors[Zerror_ct][3] += 1
         elif rm_state.data[0].real < 0:
-            errors[5][Zerror_ct] += 1
+            errors[Zerror_ct][5] += 1
         else:
-            errors[4][Zerror_ct] += 1
+            errors[Zerror_ct][4] += 1
     if print_output:
         print(f"Simulation Results for n = {n}:")
         print(f"- {errors[0]} corrected X errors\n- {errors[1]} negligible X errors\n- {errors[2]} X errors")
