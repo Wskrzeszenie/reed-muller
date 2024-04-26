@@ -1,4 +1,5 @@
 import functools as ft
+import multiprocessing as mp
 import numpy as np
 import os.path
 import scipy as sp
@@ -298,75 +299,78 @@ def debug_run():
     rm_state = rm_decode(rm_state)
     print(vec(rm_state))
 
-# simulate a noisy Pauli error channel (code capacity model)
-# n is number of runs
-# error_rate is the chance of an error on one qubit
-# error_seed is the seed used for rng
-# returns 2D array
-def simulate_QEC_cc(n=100, error_rate=0.1, noise_seed=None):
-	# rows: # of actual qubit errors
-	# columns:
-	# - 0: Correctly detected X error 
-	# - 1: Incorrectly detected X error that did not cause logical error
-	# - 2: Logical X error
-	# - 3: Correctly detected Z error 
-	# - 4: Incorrectly detected Z error that did not cause logical error
-	# - 5: Logical Z error
-    errors = np.zeros((16,6),dtype=int)
-    for i in range(n):
-        rng = np.random.default_rng(seed=noise_seed)
-        Xrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
-        Zrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
-        Xerrors = 0
-        Zerrors = 0
-        for i in range(15):
-            Xerrors |= Xrand[i]<<i
-            Zerrors |= Zrand[i]<<i
-        rm_state = ket0.copy()
-        rm_state = rm_encode(rm_state)
-        rm_state = apply_gate_on(rm_state, X, Xerrors)
-        rm_state = apply_gate_on(rm_state, Z, Zerrors)
-        Zchecks, Xchecks = check(rm_state)
-        rm_state = apply_gate_on(rm_state, X, Zcheck_decode[Zchecks])
-        rm_state = apply_gate_on(rm_state, Z, Xcheck_decode[Xchecks])
-        rm_state = rm_decode(rm_state)
-        
-        Xerror_ct = Xerrors.bit_count()
-        Zerror_ct = Zerrors.bit_count()
-        
-        # X errors
-        # detected correct error
-        if Xerrors == Zcheck_decode[Zchecks]:
-            errors[Xerror_ct][0] += 1
-        # logical error
-        elif rm_state.indices[0]:
-            errors[Xerror_ct][2] += 1
-        # detected incorrect error but did not cause logical error
-        else:
-            errors[Xerror_ct][1] += 1
-        
-        # same but for Z errors
-        if Zerrors == Xcheck_decode[Xchecks]:
-            errors[Zerror_ct][3] += 1
-        elif rm_state.data[0].real < 0:
-            errors[Zerror_ct][5] += 1
-        else:
-            errors[Zerror_ct][4] += 1
-    if print_output:
-        print(f"Simulation Results for n = {n}:")
-        print(f"- {errors[0]} corrected X errors\n- {errors[1]} negligible X errors\n- {errors[2]} logical X errors")
-        print(f"- {errors[3]} corrected Z errors\n- {errors[4]} negligible Z errors\n- {errors[5]} logical Z errors")
-    return errors
+def single_run(error_rate=0.1, noise_seed=None, model='cc',ph_error=0.1, ph_rep=3, ph_seed=None):
+    rng = np.random.default_rng(seed=noise_seed)
+    Xrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
+    Zrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
+    Xerrors = 0
+    Zerrors = 0
+    for i in range(15):
+        Xerrors |= Xrand[i]<<i
+        Zerrors |= Zrand[i]<<i
+    rm_state = ket0.copy()
+    rm_state = rm_encode(rm_state)
+    rm_state = apply_gate_on(rm_state, X, Xerrors)
+    rm_state = apply_gate_on(rm_state, Z, Zerrors)
+    Zchecks = 0
+    Xchecks = 0 
+    if model=='ph':
+        reps = []
+        meas_rng = np.random.default_rng(seed=ph_seed)
+        for i in range(ph_rep):
+            combined_check = check(rm_state)
+            combined_check = (combined_check[0]<<4)|(combined_check[1])
+            rand_meas = rng.choice(2, 14, p=[1-ph_error, ph_error])
+            for j in range(14):
+                if rand_meas[i]:
+                    combined_check ^= 1<<j
+            reps.append(combined_check)
+        majority_check = 0
+        for i in range(14):
+            count = 0
+            for rep in reps:
+                count += 1&(rep>>i)
+            if count > ph_rep//2:
+                majority_check |= 1<<i
+        Zchecks = majority_check >> 4
+        Xchecks = majority_check & 15 #0b1111
+    else:
+        Zchecks,Xchecks = check(rm_state)
+    rm_state = apply_gate_on(rm_state, X, Zcheck_decode[Zchecks])
+    rm_state = apply_gate_on(rm_state, Z, Xcheck_decode[Xchecks])
+    rm_state = rm_decode(rm_state)
     
-# simulate a noisy Pauli error channel (phenomenological model)
+    Xerror_ct = Xerrors.bit_count()
+    Zerror_ct = Zerrors.bit_count()
+    
+    # X errors
+    # detected correct error
+    Xerror_type = 1
+    Zerror_type = 4
+    if Xerrors == Zcheck_decode[Zchecks]:
+        Xerror_type = 0
+    # logical error
+    elif rm_state.indices[0]:
+        Xerror_type = 2
+    # if neither of the above, detected incorrect error but did not cause logical error
+    
+    # same but for Z errors
+    if Zerrors == Xcheck_decode[Xchecks]:
+        Zerror_type = 3
+    elif rm_state.data[0].real < 0:
+        Zerror_type = 5
+    return Xerror_ct, Xerror_type, Zerror_ct, Zerror_type
+
+# simulate a noisy Pauli error channel
 # n is number of runs
 # error_rate is the chance of an error on one qubit
-# error_seed is the seed used for rng
-# returns 2D array
+# noise_seed is the seed used for qubit errors
+# model is the analysis model to use ('cc' = code capacity, 'ph'= phenomenological)
 # ph_error sets the error rate of measurements
 # ph_rep sets the number of measurements to do
-def simulate_QEC_cc(n=100, error_rate=0.1, noise_seed=None, ph_error=0.1, ph_rep=3, ph_seed=None):
-	# rows: # of actual qubit errors
+# returns 2D array with results as specified below
+def simulate_QEC(n=100, error_rate=0.1, noise_seed=None, model='cc', ph_error=0.1, ph_rep=3, ph_seed=None):
+    # rows: # of actual qubit errors
 	# columns:
 	# - 0: Correctly detected X error 
 	# - 1: Incorrectly detected X error that did not cause logical error
@@ -375,47 +379,10 @@ def simulate_QEC_cc(n=100, error_rate=0.1, noise_seed=None, ph_error=0.1, ph_rep
 	# - 4: Incorrectly detected Z error that did not cause logical error
 	# - 5: Logical Z error
     errors = np.zeros((16,6),dtype=int)
-    for i in range(n):
-        rng = np.random.default_rng(seed=noise_seed)
-        Xrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
-        Zrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
-        Xerrors = 0
-        Zerrors = 0
-        for i in range(15):
-            Xerrors |= Xrand[i]<<i
-            Zerrors |= Zrand[i]<<i
-        rm_state = ket0.copy()
-        rm_state = rm_encode(rm_state)
-        rm_state = apply_gate_on(rm_state, X, Xerrors)
-        rm_state = apply_gate_on(rm_state, Z, Zerrors)
-        # phenomenological includes error during measurement
-        # realistically, we can only measure a finite number of times
-        # therefore, we will pick the first set of measurements that repeats
-        # we will do this individually for Zchecks and Xchecks
-        Zchecks, Xchecks = check(rm_state)
-        rm_state = apply_gate_on(rm_state, X, Zcheck_decode[Zchecks])
-        rm_state = apply_gate_on(rm_state, Z, Xcheck_decode[Xchecks])
-        rm_state = rm_decode(rm_state)
-        
-        Xerror_ct = Xerrors.bit_count()
-        Zerror_ct = Zerrors.bit_count()
-        
-        # X errors
-        # detected correct error
-        if Xerrors == Zcheck_decode[Zchecks]:
-            errors[Xerror_ct][0] += 1
-        # logical error
-        elif rm_state.indices[0]:
-            errors[Xerror_ct][2] += 1
-        # detected incorrect error but did not cause logical error
-        else:
-            errors[Xerror_ct][1] += 1
-        
-        # same but for Z errors
-        if Zerrors == Xcheck_decode[Xchecks]:
-            errors[Zerror_ct][3] += 1
-        elif rm_state.data[0].real < 0:
-            errors[Zerror_ct][5] += 1
-        else:
-            errors[Zerror_ct][4] += 1
+    results = None
+    with mp.Pool() as p:
+        results = p.starmap(single_run, n*[(error_rate, noise_seed, model,ph_error, ph_rep, ph_seed)])
+    for r in results:
+        errors[r[0]][r[1]] += 1
+        errors[r[2]][r[3]] += 1
     return errors
