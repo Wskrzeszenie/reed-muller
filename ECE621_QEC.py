@@ -17,8 +17,7 @@ if __name__ == '__main__':
 
         end_time = time.perf_counter()-start_time
         print(end_time)
-    if not os.path.exists('sim_results_ph.npy'):
-        # if not, do runs
+    if not os.path.exists('sim_results_ph_meas.npy'):
         start_time = time.perf_counter()
         runs = 1000
         steps = 20
@@ -28,14 +27,30 @@ if __name__ == '__main__':
             error_results[i-1] = simulate_QEC(n=runs, error_rate=0.1, model='ph', ph_error=np.round(i/steps,2))
                     
         error_results = np.array(error_results)
-        np.save('sim_results_ph.npy', error_results)
+        np.save('sim_results_ph_meas.npy', error_results)
 
         end_time = time.perf_counter()-start_time
         print(end_time)
+    if not os.path.exists('sim_results_ph_rep.npy'):
+        start_time = time.perf_counter()
+        runs = 1000
+        steps = 16
+        error_results = (steps-1)*[None]
+
+        for i in range(1,steps):
+            error_results[i-1] = simulate_QEC(n=runs, error_rate=0.1, model='ph', ph_error=0.1, ph_rep=2*i-1)
+                    
+        error_results = np.array(error_results)
+        np.save('sim_results_ph_rep.npy', error_results)
+
+        end_time = time.perf_counter()-start_time
+        print(end_time)
+    
     # load simulation results        
     error_results_cc = np.load('sim_results_cc.npy')
-    error_results_ph = np.load('sim_results_ph.npy')
+    error_results_ph_meas = np.load('sim_results_ph_meas.npy')
+    error_results_ph_rep = np.load('sim_results_ph_rep.npy')
 
     # save to Matlab file
-    sp.io.savemat("results.mat", {'error_results_cc':error_results_cc, 'error_results_ph':error_results_ph})
+    sp.io.savemat("results.mat", {'error_results_cc':error_results_cc, 'error_results_ph_meas':error_results_ph_meas, 'error_results_ph_rep':error_results_ph_rep})
     # a Matlab file is used to make plots because the plots in Matlab are of higher quality

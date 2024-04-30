@@ -278,6 +278,7 @@ def benchmark(n=10):
 def debug_run():
     rm_state = ket0.copy()
     rm_state = rm_encode(rm_state)
+    # make sure checks are working for single-qubit errors
     for i in range(0,15):
         rm_state = apply_gate_on(rm_state, X, 1<<i)
         Zchecks, Xchecks = check(rm_state)
@@ -289,43 +290,56 @@ def debug_run():
         print(bits_to_array(Zcheck_decode[Zchecks]), bits_to_array(Xcheck_decode[Xchecks]))
         rm_state = apply_gate_on(rm_state, Z, 1<<i)
     rm_state = rm_decode(rm_state)
+    # make sure state returns to |0>
     print(vec(rm_state))
+    # make sure logical X works
     rm_state = rm_encode(rm_state)
     rm_state = apply_gates(rm_state, 15*[X])
     rm_state = rm_decode(rm_state)
     print(vec(rm_state))
+    # make sure logical Z works
     rm_state = rm_encode(rm_state)
     rm_state = apply_gates(rm_state, 15*[Z])
     rm_state = rm_decode(rm_state)
     print(vec(rm_state))
 
-def single_run(error_rate=0.1, noise_seed=None, model='cc',ph_error=0.1, ph_rep=3, ph_seed=None):
+# perform a single QEC cycle
+def single_run(error_rate=0.1, noise_seed=None, model='cc', ph_error=0.1, ph_rep=3, ph_seed=None):
     rng = np.random.default_rng(seed=noise_seed)
+    # generate arrays that represent where errors are applied
+    # 0 means apply identity, 1 means apply error
     Xrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
     Zrand = rng.choice(2, 15, p=[1-error_rate, error_rate])
     Xerrors = 0
     Zerrors = 0
+    # convert array to bit array
+    # leftmost is 15th qubit, rightmost is 1st qubit
     for i in range(15):
         Xerrors |= Xrand[i]<<i
         Zerrors |= Zrand[i]<<i
+    # prepare state
     rm_state = ket0.copy()
     rm_state = rm_encode(rm_state)
+    # apply errors
     rm_state = apply_gate_on(rm_state, X, Xerrors)
     rm_state = apply_gate_on(rm_state, Z, Zerrors)
     Zchecks = 0
-    Xchecks = 0 
+    Xchecks = 0
+    # if error model is phenomenological, simulate measurement errors
     if model=='ph':
         reps = []
         meas_rng = np.random.default_rng(seed=ph_seed)
+        # preform repeated measurements with error
         for i in range(ph_rep):
             combined_check = check(rm_state)
             combined_check = (combined_check[0]<<4)|(combined_check[1])
             rand_meas = rng.choice(2, 14, p=[1-ph_error, ph_error])
             for j in range(14):
-                if rand_meas[i]:
+                if rand_meas[j]:
                     combined_check ^= 1<<j
             reps.append(combined_check)
         majority_check = 0
+        # for each stabilizer, pick the most probable result using majority voting
         for i in range(14):
             count = 0
             for rep in reps:
@@ -334,12 +348,15 @@ def single_run(error_rate=0.1, noise_seed=None, model='cc',ph_error=0.1, ph_rep=
                 majority_check |= 1<<i
         Zchecks = majority_check >> 4
         Xchecks = majority_check & 15 #0b1111
+    # otherwise, assume perfect measurements
     else:
         Zchecks,Xchecks = check(rm_state)
+    # use lookup table to apply X and Z corrections
     rm_state = apply_gate_on(rm_state, X, Zcheck_decode[Zchecks])
     rm_state = apply_gate_on(rm_state, Z, Xcheck_decode[Xchecks])
     rm_state = rm_decode(rm_state)
     
+    # count number of actual errors
     Xerror_ct = Xerrors.bit_count()
     Zerror_ct = Zerrors.bit_count()
     
@@ -361,7 +378,7 @@ def single_run(error_rate=0.1, noise_seed=None, model='cc',ph_error=0.1, ph_rep=
         Zerror_type = 5
     return Xerror_ct, Xerror_type, Zerror_ct, Zerror_type
 
-# simulate a noisy Pauli error channel
+# simulate a Pauli error channel
 # n is number of runs
 # error_rate is the chance of an error on one qubit
 # noise_seed is the seed used for qubit errors
@@ -379,9 +396,11 @@ def simulate_QEC(n=100, error_rate=0.1, noise_seed=None, model='cc', ph_error=0.
 	# - 4: Incorrectly detected Z error that did not cause logical error
 	# - 5: Logical Z error
     errors = np.zeros((16,6),dtype=int)
+    
     results = None
     with mp.Pool() as p:
-        results = p.starmap(single_run, n*[(error_rate, noise_seed, model,ph_error, ph_rep, ph_seed)])
+        results = p.starmap(single_run, n*[(error_rate, noise_seed, model, ph_error, ph_rep, ph_seed)])
+    # store results of runs into errors array
     for r in results:
         errors[r[0]][r[1]] += 1
         errors[r[2]][r[3]] += 1
