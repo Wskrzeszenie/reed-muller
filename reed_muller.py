@@ -26,8 +26,9 @@ H = sp.sparse.coo_array(np.array([[1,1],[1,-1]],dtype=np.complex_)/np.sqrt(2))
 
 # perform tensor product on a list of matrices
 # returns resulting tensor product
+
 def tensor(matrices):
-    return ft.reduce(lambda x,y: sp.sparse.kron(x,y,format='coo'), matrices)
+    return (ft.reduce(lambda x,y: sp.sparse.kron(x,y,format='coo'), matrices)).tocsc()
 
 # Z and X stabilizers
 # stored in 2D arrays for multiplication optimization reasons
@@ -47,6 +48,21 @@ Xstabs=[[tensor([X,I,X,I,X,I,X]),tensor([I,X,I,X,I,X,I,X])],
         [tensor([I,X,X,I,I,X,X]),tensor([I,I,X,X,I,I,X,X])],
         [tensor([I,I,I,X,X,X,X]),tensor([I,I,I,I,X,X,X,X])],
         [tensor([I,I,I,I,I,I,I]),tensor([X,X,X,X,X,X,X,X])]]
+
+# pre-computed matrices for state encoding
+stab_1=[[tensor([ZERO]+6*[I]),tensor(8*[I])],
+        [tensor([ONE]+3*[I,X]),tensor(4*[I,X])]]
+stab_2=[[tensor([I,ZERO,I,I,I,I,I]),tensor(8*[I])],
+        [tensor([I,ONE,X,I,I,X,X]),tensor(2*[I,I,X,X])]]
+stab_3=[[tensor([I,I,I,ZERO,I,I,I]),tensor(8*[I])],
+        [tensor([I,I,I,ONE,X,X,X]),tensor(4*[I]+4*[X])]]
+stab_4=[tensor(7*[I]),tensor([ZERO]+7*[I])+tensor([ONE]+7*[X])]
+
+decode_right = tensor([H @ ket01, H @ ket01, ket01, H @ ket01, ket01, ket01, ket01])
+decode_left = tensor([ket01.T @ H, ket01.T, ket01.T, ket01.T, ket01.T, ket01.T, ket01.T, I])
+
+flip_5=[[tensor(7*[I]),tensor(7*[I]+[ZERO])],
+        [tensor([I,I,X,I,X,X,I]),tensor([I,X,X,I,X,I,I,ONE])]]
 
 # returns the number of bits between the leftmost 1 and the rightmost 1 for an integer
 def bit_distance(num):
@@ -84,6 +100,8 @@ def bits_to_array(num, format='array'):
 # converts matrix to column vector
 # returns column vector
 def vec(matrix):
+    if matrix.shape[1] == 1:
+        return matrix
     r,c = matrix.shape
     return matrix.reshape((r*c,1),order='F')
 
@@ -91,12 +109,11 @@ def vec(matrix):
 # returns square matrix
 # if matrix is not square-able, does approximate square matrix with dimensions (2n,n)
 def square_mat(matrix):
+    if matrix.shape[0] == matrix.shape[1] or matrix.shape[0] == 2*matrix.shape[1]:
+        return matrix
     entries = qcount(matrix)
     return matrix.reshape((1<<(entries-entries//2),1<<(entries//2)),order='F')
 
-# returns purity of state
-#def purity(state):
-    
 # counts number of qubits represented by sparse matrix
 # state is an n-qubit state represented as a sparse matrix
 # returns number of qubits in state based on size
@@ -107,8 +124,7 @@ def qcount(state):
 # state is an n-qubit state represented as a sparse matrix
 # returns state after applying gates
 def apply_gates(state, gates):
-    state = square_mat(state)
-    return (tensor(gates[len(gates)//2:]).tocsc() @ state.tocsc() @ tensor(gates[:len(gates)//2]).tocsc().conj().T)
+    return (tensor(gates[len(gates)//2:]) @ state @ tensor(gates[:len(gates)//2]).conj().T.tocsc())
 
 # applies a single-qubit gate to multiple qubits based on input bit array
 # state is an n-qubit state represented as a sparse matrix
@@ -170,20 +186,32 @@ def rm_encode(state, p=15):
     state = CNOT(state, 1<<(3+offset), 0b111100001110000<<offset)
     state = CNOT(state, 1<<(7+offset), 0b111111100000000<<offset)
     return state
+
+# pre-computed logical states for Reed-Muller code
+rm_encoded_state_0 = rm_encode(ket0)
+rm_encoded_state_1 = rm_encode(ket1)
     
 # decodes state from [[15,1,3]] Reed-Muller code
 # state is an 15-qubit state represented as a sparse matrix
 # p is an optional argument indicating state position (15 by default)
 # returns 1-qubit state
 def rm_decode(state, p=1):
-    offset = p-1
-    state = CNOT(state, 1<<(7+offset), 0b111111100000000<<offset)
-    state = CNOT(state, 1<<(3+offset), 0b111100001110000<<offset)
-    state = CNOT(state, 1<<(1+offset), 0b110011001100100<<offset)
-    state = CNOT(state, 1<<offset, 0b101010101010100<<offset)
-    state = CNOT(state, 1<<(14+offset), 0b101100110100<<offset)
-    state = apply_gate_on(state, H, 0b10001011<<offset)
-    state = partial_trace(state, 16383) #0b11111111111111
+    if p==1:
+        state = stab_4[1] @ state @ stab_4[0]
+        state = stab_3[0][1] @ state @ stab_3[0][0] + stab_3[1][1] @ state @ stab_3[1][0]
+        state = stab_2[0][1] @ state @ stab_2[0][0] + stab_2[1][1] @ state @ stab_2[1][0]
+        state = stab_1[0][1] @ state @ stab_1[0][0] + stab_1[1][1] @ state @ stab_1[1][0]
+        state = flip_5[0][1] @ state @ flip_5[0][0] + flip_5[1][1] @ state @ flip_5[1][0]
+        state = decode_left @ state @ decode_right
+    else:
+        offset = p-1
+        state = CNOT(state, 1<<(7+offset), 0b111111100000000<<offset)
+        state = CNOT(state, 1<<(3+offset), 0b111100001110000<<offset)
+        state = CNOT(state, 1<<(1+offset), 0b110011001100100<<offset)
+        state = CNOT(state, 1<<offset, 0b101010101010100<<offset)
+        state = CNOT(state, 1<<(14+offset), 0b101100110100<<offset)
+        state = apply_gate_on(state, H, 0b10001011<<offset)
+        state = partial_trace(state, 16383<<offset) #0b11111111111111
     return state
 
 # performs checks for Reed-Muller code
@@ -194,18 +222,16 @@ def rm_decode(state, p=1):
 # 2) two arrays, one for the measurement results of the Z stabilizers and one for the X stabilizers
 def check(state, p=1, format='bits'):
     if qcount(state) != 15:
-        state = partial_trace(state, ((1<<qcount(state))-1)<<(14+p)|((1<<(p-1)-1)))
+       state = partial_trace(state, ((1<<qcount(state))-1)<<(14+p)|((1<<(p-1)-1)))
     state = square_mat(state).tocsc()
     Zchecks = 0 if format=='bits' else np.zeros(10,dtype=np.complex_)
     Xchecks = 0 if format=='bits' else np.zeros(4,dtype=np.complex_)
-    state_c = state.conj()
+    state_c = state.conj().tocsc()
     if format=='bits':
         for i in range(10):
-            if ((state_c*(Zstabs[i][1] @ state.tocsc() @ Zstabs[i][0])).sum().real < 0):
-                Zchecks |= 1<<i
+            Zchecks |= ((state_c*(Zstabs[i][1] @ state @ Zstabs[i][0])).sum().real < 0)<<i
         for i in range(4):
-            if ((state_c*(Xstabs[i][1] @ state.tocsc() @ Xstabs[i][0])).sum().real < 0):
-                Xchecks |= 1<<i
+            Xchecks |= ((state_c*(Xstabs[i][1] @ state @ Xstabs[i][0])).sum().real < 0)<<i
     else:
         for i in range(10):
             Zchecks[i] = (state_c*(Zstabs[i][1] @ state.tocsc() @ Zstabs[i][0])).sum()
@@ -218,9 +244,7 @@ def check(state, p=1, format='bits'):
 if not os.path.exists('Zcheck_lookup.npy'):
 	# code used to create error lookup dictionary for Zchecks
 
-	rm_state = ket0.copy()
-	rm_state = rm_encode(rm_state)
-
+	rm_state = rm_encoded_state_0
 	# fill list with 1024 entries that are the least optimal error 
 			                    #0b111111111111111
 	error_mapping = [32767 for _ in range(1024)]
@@ -231,7 +255,7 @@ if not os.path.exists('Zcheck_lookup.npy'):
 		# apply X gates (bit flips) only on the bits that differ between iterations
 		if i: rm_state = apply_gate_on(rm_state,X,(i-1)^i)
 		# perform checks
-		Zchecks,Xchecks = check(rm_state)
+		Zchecks, Xchecks = check(rm_state)
 		# calculate 3 conditions for most likely error
 		# 1) smallest number of qubits affected
 		# 2) smallest distance between leftmost and rightmost affected qubits
@@ -259,8 +283,7 @@ def benchmark(n=10):
     for i in range(n):
         start_time = time.perf_counter()
         
-        rm_state = ket0.copy()
-        rm_state = rm_encode(rm_state)
+        rm_state = rm_encoded_state_0
         for i in range(0,15):
             rm_state = apply_gate_on(rm_state, X, 1<<i)
             Zchecks, Xchecks = check(rm_state)
@@ -276,8 +299,7 @@ def benchmark(n=10):
     
 # code used for debugging Reed-Muller encoding/decoding, checks, logical operators
 def debug_run():
-    rm_state = ket0.copy()
-    rm_state = rm_encode(rm_state)
+    rm_state = rm_encoded_state_0
     # make sure checks are working for single-qubit errors
     for i in range(0,15):
         rm_state = apply_gate_on(rm_state, X, 1<<i)
@@ -318,8 +340,7 @@ def single_run(error_rate=0.1, noise_seed=None, model='cc', ph_error=0.1, ph_rep
         Xerrors |= Xrand[i]<<i
         Zerrors |= Zrand[i]<<i
     # prepare state
-    rm_state = ket0.copy()
-    rm_state = rm_encode(rm_state)
+    rm_state = rm_encoded_state_0
     # apply errors
     rm_state = apply_gate_on(rm_state, X, Xerrors)
     rm_state = apply_gate_on(rm_state, Z, Zerrors)
@@ -327,7 +348,7 @@ def single_run(error_rate=0.1, noise_seed=None, model='cc', ph_error=0.1, ph_rep
     Xchecks = 0
     # if error model is phenomenological, simulate measurement errors
     if model=='ph':
-        reps = []
+        reps = np.zeros(ph_rep,dtype=np.int_)
         meas_rng = np.random.default_rng(seed=ph_seed)
         # preform repeated measurements with error
         for i in range(ph_rep):
@@ -335,22 +356,20 @@ def single_run(error_rate=0.1, noise_seed=None, model='cc', ph_error=0.1, ph_rep
             combined_check = (combined_check[0]<<4)|(combined_check[1])
             rand_meas = rng.choice(2, 14, p=[1-ph_error, ph_error])
             for j in range(14):
-                if rand_meas[j]:
-                    combined_check ^= 1<<j
-            reps.append(combined_check)
+                combined_check ^= (rand_meas[j])<<j
+            reps[i] = combined_check
         majority_check = 0
         # for each stabilizer, pick the most probable result using majority voting
         for i in range(14):
             count = 0
             for rep in reps:
                 count += 1&(rep>>i)
-            if count > ph_rep//2:
-                majority_check |= 1<<i
+            majority_check |= (count > ph_rep//2)<<i
         Zchecks = majority_check >> 4
         Xchecks = majority_check & 15 #0b1111
     # otherwise, assume perfect measurements
     else:
-        Zchecks,Xchecks = check(rm_state)
+        Zchecks, Xchecks = check(rm_state)
     # use lookup table to apply X and Z corrections
     rm_state = apply_gate_on(rm_state, X, Zcheck_decode[Zchecks])
     rm_state = apply_gate_on(rm_state, Z, Xcheck_decode[Xchecks])
@@ -361,21 +380,14 @@ def single_run(error_rate=0.1, noise_seed=None, model='cc', ph_error=0.1, ph_rep
     Zerror_ct = Zerrors.bit_count()
     
     # X errors
-    # detected correct error
-    Xerror_type = 1
-    Zerror_type = 4
-    if Xerrors == Zcheck_decode[Zchecks]:
-        Xerror_type = 0
-    # logical error
-    elif rm_state.indices[0]:
-        Xerror_type = 2
-    # if neither of the above, detected incorrect error but did not cause logical error
+    Xerror_type = 1 + rm_state.indices[0] - (Xerrors == Zcheck_decode[Zchecks])
+                    # logical error		    # detected correct error
+                    # if neither of the above, detected incorrect error but did not cause logical error
+
+	# Z errors
+    rm_state = apply_gate_on(apply_gate_on(rm_encoded_state_1, Z, Zerrors), Z, Xcheck_decode[Xchecks])
+    Zerror_type = 4 + (rm_state.data[0].real < 0) - (Zerrors == Xcheck_decode[Xchecks])
     
-    # same but for Z errors
-    if Zerrors == Xcheck_decode[Xchecks]:
-        Zerror_type = 3
-    elif rm_state.data[0].real < 0:
-        Zerror_type = 5
     return Xerror_ct, Xerror_type, Zerror_ct, Zerror_type
 
 # simulate a Pauli error channel
@@ -398,7 +410,7 @@ def simulate_QEC(n=100, error_rate=0.1, noise_seed=None, model='cc', ph_error=0.
     errors = np.zeros((16,6),dtype=int)
     
     results = None
-    with mp.Pool() as p:
+    with mp.Pool(processes=mp.cpu_count()-1) as p:
         results = p.starmap(single_run, n*[(error_rate, noise_seed, model, ph_error, ph_rep, ph_seed)])
     # store results of runs into errors array
     for r in results:

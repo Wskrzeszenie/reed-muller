@@ -19,6 +19,7 @@ for k=1:6
     bar3(error_results_cc(:,:,k),1)
     set(gca,'XTickLabel',0:1:15)
     set(gca,'YTickLabel',0:0.25:1)
+    zlim([0 0.5])
     if k < 4
         xlabel('# of Actual X Errors')
     else
@@ -56,6 +57,7 @@ for k=1:6
     bar3(error_results_ph_qubit(:,:,k),1)
     set(gca,'XTickLabel',0:1:15)
     set(gca,'YTickLabel',0:0.25:1)
+    zlim([0 0.5])
     if k < 4
         xlabel('# of Actual X Errors')
     else
@@ -93,6 +95,7 @@ for k=1:6
     bar3(error_results_ph_meas(:,:,k),1)
     set(gca,'XTickLabel',0:1:15)
     set(gca,'YTickLabel',0:0.25:1)
+    zlim([0 0.5])
     if k < 4
         xlabel('# of Actual X Errors')
     else
@@ -126,6 +129,7 @@ for k=1:6
     bar3(error_results_ph_rep(:,:,k),1)
     set(gca,'XTickLabel',0:1:15)
     set(gca,'YTickLabel',1:2:31)
+    zlim([0 0.5])
     if k < 4
         xlabel('# of Actual X Errors')
     else
