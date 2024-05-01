@@ -1,12 +1,12 @@
 clear
 load('results.mat')
 
+n = 1000;
 error_results_size = size(error_results_cc);
-n = sum(error_results_cc,'all')/error_results_size(1)/2;
+n = sum(error_results_cc,'all')/error_results_size;
 
 
 error_results_cc = double(error_results_cc)/n;
-error_results_ph_qubit = double(error_results_ph_qubit)/n;
 error_results_ph_meas = double(error_results_ph_meas)/n;
 error_results_ph_rep = double(error_results_ph_rep)/n;
 
@@ -84,7 +84,7 @@ subplot(2,3,6)
 title('Freq. of Logical Detected Z Errors')
 
 sgtitle({'Phenomenological Model X and Z Errors for Various Qubit Error Rates',"(n="+n+", Measurement Error Rate=0.1, Measurements=3)"})
-saveas(gcf,'3D_plot_ph_qubit.png')
+saveas(gcf,'3D_plot_cc.png')
 
 %%
 figure(3)

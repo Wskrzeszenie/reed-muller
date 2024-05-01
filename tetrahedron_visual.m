@@ -1,5 +1,4 @@
 clear
-sin(acos(-1/3)/2)
 
 s2c = @(rho,theta,phi) [rho*sin(theta)*cos(phi) rho*sin(theta)*sin(phi) rho*cos(theta)];
 clf
@@ -108,7 +107,7 @@ XYZk = [s2c(0,0,0);
         s2c(1/3,acos(-1/3)/2,pi/3);
         s2c(tan(pi/6),acos(-1/3)/2,0);
         s2c(1/3,acos(-1/3)/2,-pi/3);
-
+    
         s2c(0,0,0);
         s2c(1/3,acos(-1/3)/2,pi);
         s2c(tan(pi/6),acos(-1/3)/2,2*pi/3);
@@ -130,7 +129,6 @@ for k=1:6
     patch(Xk(4*k-3:4*k),Yk(4*k-3:4*k),Zk(4*k-3:4*k),'k','FaceAlpha',.5)
 end
 hold off
-
 
 axis equal
 grid off
